@@ -40,8 +40,13 @@ def get_video_info(url):
             'yt-dlp',
             '--dump-json',
             '--no-playlist',
+            '--no-check-certificates',
+            '--geo-bypass',
+            '--extractor-args', 'youtube:player_client=android',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
             url
         ]
+        
         logger.info(f"Running command: {' '.join(command)}")
         result = subprocess.run(command, capture_output=True, text=True, check=True)
         logger.info("Successfully got video info")
@@ -111,12 +116,14 @@ def download():
         return jsonify({'success': False, 'error': 'Invalid YouTube URL'})
 
     unique_id = str(uuid.uuid4())
-    outtmpl = os.path.join(DOWNLOAD_FOLDER, f'{unique_id}.%(ext)s')
+    return download_video(url, quality, unique_id)
 
-    # Quality mapping with better format selection
+def download_video(url, quality, unique_id):
+    """Download video using yt-dlp with specified quality."""
+    outtmpl = os.path.join(DOWNLOAD_FOLDER, f'{unique_id}.%(ext)s')
+    
     format_map = {
         '360p': 'bestvideo[height<=360]+bestaudio/best[height<=360]',
-        '480p': 'bestvideo[height<=480]+bestaudio/best[height<=480]',
         '720p': 'bestvideo[height<=720]+bestaudio/best[height<=720]',
         '1080p': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
         'audio': 'bestaudio/best'
@@ -128,6 +135,10 @@ def download():
         '--no-playlist',
         '--no-warnings',
         '--progress',
+        '--no-check-certificates',
+        '--geo-bypass',
+        '--extractor-args', 'youtube:player_client=android',
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
         '--fragment-retries', '10',
         '--retries', '10',
         '--concurrent-fragments', '4',
@@ -176,6 +187,8 @@ def download():
             error_message = 'This video is not available or may be private.'
         elif 'Sign in to confirm your age' in error_message:
             error_message = 'Age-restricted video. Cannot download.'
+        elif "Sign in to confirm you're not a bot" in error_message:
+            error_message = 'YouTube requires authentication. Please try again in a few minutes.'
         return jsonify({'success': False, 'error': error_message})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
