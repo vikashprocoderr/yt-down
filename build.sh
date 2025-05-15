@@ -13,10 +13,12 @@ echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /et
 apt-get update
 apt-get install -y google-chrome-stable
 
-# Update pip and install Python dependencies
-python -m pip install --upgrade pip
-pip install --no-cache-dir -r requirements.txt
-pip install --no-cache-dir --upgrade yt-dlp
+# Ensure latest pip version
+curl -sS https://bootstrap.pypa.io/get-pip.py | python3
+
+# Install Python dependencies with latest pip
+python3 -m pip install --no-cache-dir -r requirements.txt
+python3 -m pip install --no-cache-dir --upgrade yt-dlp
 
 # Create downloads directory with proper permissions
 mkdir -p downloads
