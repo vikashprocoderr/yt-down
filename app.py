@@ -8,11 +8,16 @@ from urllib.parse import urlparse, parse_qs
 import tempfile
 import shutil
 from datetime import datetime, timedelta
+import logging
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 DOWNLOAD_FOLDER = os.environ.get('DOWNLOAD_FOLDER', 'downloads')
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Production configurations
 if os.environ.get('FLASK_ENV') == 'production':
@@ -30,17 +35,26 @@ def is_valid_youtube_url(url):
 def get_video_info(url):
     """Get video information using yt-dlp."""
     try:
+        logger.info(f"Attempting to get video info for URL: {url}")
         command = [
             'yt-dlp',
             '--dump-json',
             '--no-playlist',
             url
         ]
+        logger.info(f"Running command: {' '.join(command)}")
         result = subprocess.run(command, capture_output=True, text=True, check=True)
+        logger.info("Successfully got video info")
         return json.loads(result.stdout)
     except subprocess.CalledProcessError as e:
+        logger.error(f"Error running yt-dlp: {str(e)}")
+        logger.error(f"stderr: {e.stderr}")
         return None
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing JSON: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
         return None
 
 def cleanup_old_files():
@@ -180,6 +194,25 @@ def serve_file(filename):
         )
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/health')
+def health_check():
+    try:
+        # Check if yt-dlp is installed and working
+        version_cmd = ['yt-dlp', '--version']
+        version = subprocess.run(version_cmd, capture_output=True, text=True, check=True)
+        return jsonify({
+            'status': 'healthy',
+            'yt_dlp_version': version.stdout.strip(),
+            'downloads_dir': os.path.abspath(DOWNLOAD_FOLDER),
+            'downloads_writable': os.access(DOWNLOAD_FOLDER, os.W_OK)
+        })
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e)
+        }), 500
 
 @app.errorhandler(404)
 def not_found_error(error):

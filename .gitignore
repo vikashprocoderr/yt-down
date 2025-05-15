@@ -23,3 +23,4 @@ var/
 .venv
 venv/
 ENV/
+pip install -r requirements.txt && pip install --upgrade yt-dlp
