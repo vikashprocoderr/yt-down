@@ -9,11 +9,18 @@ import tempfile
 import shutil
 from datetime import datetime, timedelta
 import logging
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import threading
+import time
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 DOWNLOAD_FOLDER = os.environ.get('DOWNLOAD_FOLDER', 'downloads')
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+COOKIES_FILE = os.path.join(DOWNLOAD_FOLDER, 'youtube.com_cookies.txt')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +30,46 @@ logger = logging.getLogger(__name__)
 if os.environ.get('FLASK_ENV') == 'production':
     app.config['DEBUG'] = False
     app.config['PROPAGATE_EXCEPTIONS'] = True
+
+def get_youtube_cookies():
+    """Get YouTube cookies using undetected-chromedriver."""
+    try:
+        options = uc.ChromeOptions()
+        options.add_argument('--headless')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        
+        driver = uc.Chrome(options=options)
+        driver.get('https://www.youtube.com')
+        time.sleep(5)  # Wait for cookies to be set
+        
+        cookies = driver.get_cookies()
+        driver.quit()
+        
+        # Format cookies for yt-dlp
+        cookie_string = ""
+        for cookie in cookies:
+            cookie_string += f"{cookie['domain']}\tTRUE\t{cookie['path']}\t"
+            cookie_string += f"{'TRUE' if cookie['secure'] else 'FALSE'}\t"
+            cookie_string += f"0\t{cookie['name']}\t{cookie['value']}\n"
+        
+        with open(COOKIES_FILE, 'w', encoding='utf-8') as f:
+            f.write(cookie_string)
+            
+        return True
+    except Exception as e:
+        logger.error(f"Error getting cookies: {str(e)}")
+        return False
+
+def update_cookies_periodically():
+    """Update cookies every 30 minutes."""
+    while True:
+        get_youtube_cookies()
+        time.sleep(1800)  # Sleep for 30 minutes
+
+# Start cookie updater thread
+cookie_thread = threading.Thread(target=update_cookies_periodically, daemon=True)
+cookie_thread.start()
 
 def is_valid_youtube_url(url):
     """Validate YouTube URL format and extract video ID."""
@@ -36,13 +83,17 @@ def get_video_info(url):
     """Get video information using yt-dlp."""
     try:
         logger.info(f"Attempting to get video info for URL: {url}")
+        
+        if not os.path.exists(COOKIES_FILE):
+            get_youtube_cookies()
+        
         command = [
             'yt-dlp',
             '--dump-json',
             '--no-playlist',
             '--no-check-certificates',
             '--geo-bypass',
-            '--extractor-args', 'youtube:player_client=android',
+            '--cookies', COOKIES_FILE,
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
             url
         ]
@@ -54,6 +105,14 @@ def get_video_info(url):
     except subprocess.CalledProcessError as e:
         logger.error(f"Error running yt-dlp: {str(e)}")
         logger.error(f"stderr: {e.stderr}")
+        if "Sign in to confirm you're not a bot" in e.stderr:
+            # Try refreshing cookies and retry once
+            if get_youtube_cookies():
+                try:
+                    result = subprocess.run(command, capture_output=True, text=True, check=True)
+                    return json.loads(result.stdout)
+                except:
+                    pass
         return None
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing JSON: {str(e)}")
